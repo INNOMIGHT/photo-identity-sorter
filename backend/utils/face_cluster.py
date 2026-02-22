@@ -1,101 +1,125 @@
-from backend.utils.face_preprocess import extract_good_faces
-from deepface import DeepFace
+import os
+import shutil
+import numpy as np
+import cv2
 from sklearn.cluster import DBSCAN
-import numpy as np
-from sklearn.metrics.pairwise import cosine_distances
-from sklearn.metrics.pairwise import cosine_distances
-import numpy as np
+from insightface.app import FaceAnalysis
 
 
-def merge_close_clusters(embeddings, labels, merge_threshold=0.35):
-    unique_labels = [l for l in set(labels) if l != -1]
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 
-    centroids = {}
-    for label in unique_labels:
-        centroids[label] = np.mean(embeddings[labels == label], axis=0)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    merged = {}
-    used = set()
+face_model = None
 
-    for i in unique_labels:
-        if i in used:
-            continue
-        merged[i] = [i]
-        used.add(i)
+def get_face_model():
+    global face_model
+    if face_model is None:
+        face_model = FaceAnalysis(providers=["CPUExecutionProvider"])
+        face_model.prepare(ctx_id=0, det_size=(640, 640))
+    return face_model
 
-        for j in unique_labels:
-            if j in used:
-                continue
-            dist = cosine_distances([centroids[i]], [centroids[j]])[0][0]
-            if dist < merge_threshold:
-                merged[i].append(j)
-                used.add(j)
+def reset_output():
+    if os.path.exists(OUTPUT_DIR):
+        shutil.rmtree(OUTPUT_DIR)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    return merged
+
+def is_blurry(image, threshold=10):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    variance = cv2.Laplacian(gray, cv2.CV_64F).var()
+    print("Blur score:", variance)
+    return variance < threshold
+
+
+def save_results(groups):
+    for person, images in groups.items():
+        person_dir = os.path.join(OUTPUT_DIR, person)
+        os.makedirs(person_dir, exist_ok=True)
+
+        for img_path in images:
+            if os.path.exists(img_path):
+                shutil.copy(img_path, os.path.join(person_dir, os.path.basename(img_path)))
 
 
 def cluster_faces(image_paths):
+
+    model = get_face_model()
+    faces = model.get(img)
+    reset_output()   # ✅ AUTO CLEAN
+
     face_data = []
 
     for path in image_paths:
-        good_faces = extract_good_faces(path)
 
-        for face_img in good_faces:
-            rep = DeepFace.represent(
-                img_path = face_img,
-                model_name="ArcFace",
-                detector_backend="skip",   
-                enforce_detection=False,
-                normalization="ArcFace"
-            )[0]
+        img = cv2.imread(path)
+        if img is None:
+            continue
+
+        faces = face_model.get(img)
+
+        if len(faces) == 0:
+            print("No faces:", path)
+            continue
+
+        img_h, img_w = img.shape[:2]
+        img_area = img_h * img_w
+
+        for face in faces:
+
+            if face.det_score < 0.55:     # slightly relaxed
+                print("Rejected (low confidence):", face.det_score)
+                continue
+
+
+            x1, y1, x2, y2 = face.bbox.astype(int)
+
+            x1 = max(0, x1)
+            y1 = max(0, y1)
+            x2 = min(img_w, x2)
+            y2 = min(img_h, y2)
+            w, h = x2 - x1, y2 - y1
+            area = w * h
+
+            if area < 0.005 * img_area:   # ✅ RELAXED (very important)
+                print("Rejected (tiny face):", area)
+                continue
+
+            crop = img[y1:y2, x1:x2]
+
+            if crop.size == 0:
+                continue
+
+            if is_blurry(crop):
+                print("Rejected (blurry)")
+                continue
 
             face_data.append({
                 "image": path,
-                "embedding": rep["embedding"]
+                "embedding": face.embedding
             })
+
+    if len(face_data) == 0:
+        return {}
 
     embeddings = np.array([f["embedding"] for f in face_data])
 
+    print("Total embeddings:", len(embeddings))
 
-    print("Cosine distance matrix:")
-    print(cosine_distances(embeddings))
+    labels = DBSCAN(
+        eps=0.55,
+        min_samples=1,
+        metric="cosine"
+    ).fit_predict(embeddings)
 
-    clustering = DBSCAN(eps=0.30, min_samples=1, metric="cosine")
-    labels = clustering.fit_predict(embeddings)
+    groups = {}
 
-    print("Cosine distance matrix:")
-    print(cosine_distances(embeddings))
+    for label, record in zip(labels, face_data):
+        groups.setdefault(f"Person_{label}", set()).add(record["image"])
 
-    print_cluster_stats(embeddings, labels)
+    groups = {k: list(v) for k, v in groups.items()}
 
-    # Step 1: Merge close identity clusters (handle same-person split)
-    merged_map = merge_close_clusters(embeddings, labels)
+    save_results(groups)
 
-    # Step 2: Build identity -> image set mapping (multi-label)
-    final_groups = {}
-
-    for new_id, old_ids in merged_map.items():
-        person_key = f"Person_{new_id}"
-        final_groups[person_key] = set()
-
-        for oid in old_ids:
-            for record, lab in zip(face_data, labels):
-                if lab == oid:
-                    final_groups[person_key].add(record["image"])
-
-    # Convert sets to lists for JSON serialization
-    final_groups = {k: list(v) for k, v in final_groups.items()}
-
-    return final_groups
-
-
-def print_cluster_stats(embeddings, labels):
-    unique = set(labels)
-    for i in unique:
-        for j in unique:
-            if i >= j or i == -1 or j == -1:
-                continue
-            ci = np.mean(embeddings[labels == i], axis=0)
-            cj = np.mean(embeddings[labels == j], axis=0)
-            dist = cosine_distances([ci], [cj])[0][0]
-            print(f"Centroid distance Person_{i} vs Person_{j}: {dist:.3f}")
+    return groups
