@@ -17,7 +17,7 @@ function App() {
     setLoading(true);
 
     try {
-      const response = await axios.post("http://127.0.0.1:8000/upload", formData);
+      const response = await axios.post("http://13.239.35.7:8000/upload", formData);
       setClusters(response.data.clusters);
     } catch (err) {
       alert("Upload failed");
