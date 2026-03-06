@@ -21,9 +21,14 @@ app.mount("/images", StaticFiles(directory=UPLOAD_DIR), name="images")
 app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
 
 # Enable CORS for frontend (GitHub Pages etc.)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://innomight.github.io",
+        "http://localhost:5173",
+        "http://localhost:3000"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
