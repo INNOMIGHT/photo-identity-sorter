@@ -1,8 +1,10 @@
-fastapi
-uvicorn
+fastapi==0.110.0
+uvicorn==0.29.0
+python-multipart==0.0.9
+pydantic==2.6.4
+starlette==0.36.3
 numpy
 opencv-python-headless
 scikit-learn
 insightface
 onnxruntime
-python-multipart
