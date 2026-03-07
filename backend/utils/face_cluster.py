@@ -11,15 +11,14 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-face_model = None
 
-def get_face_model():
-    global face_model
-    if face_model is None:
-        face_model = FaceAnalysis(providers=["CPUExecutionProvider"])
-        face_model.prepare(ctx_id=0, det_size=(640, 640))
-    return face_model
+# Load model once globally
+face_model = FaceAnalysis(providers=["CPUExecutionProvider"])
+face_model.prepare(ctx_id=0, det_size=(320, 320))   # 640 → 320 (much faster)
 
+
+
+# Utilities
 def reset_output():
     if os.path.exists(OUTPUT_DIR):
         shutil.rmtree(OUTPUT_DIR)
@@ -28,9 +27,7 @@ def reset_output():
 
 def is_blurry(image, threshold=10):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    variance = cv2.Laplacian(gray, cv2.CV_64F).var()
-    print("Blur score:", variance)
-    return variance < threshold
+    return cv2.Laplacian(gray, cv2.CV_64F).var() < threshold
 
 
 def save_results(groups):
@@ -40,12 +37,16 @@ def save_results(groups):
 
         for img_path in images:
             if os.path.exists(img_path):
-                shutil.copy(img_path, os.path.join(person_dir, os.path.basename(img_path)))
-                
+                shutil.copy(
+                    img_path,
+                    os.path.join(person_dir, os.path.basename(img_path))
+                )
 
+
+
+# Main clustering pipeline
 def cluster_faces(image_paths):
 
-    model = get_face_model()
     reset_output()
 
     face_data = []
@@ -56,10 +57,9 @@ def cluster_faces(image_paths):
         if img is None:
             continue
 
-        faces = model.get(img)
+        faces = face_model.get(img)
 
-        if len(faces) == 0:
-            print("No faces:", path)
+        if not faces:
             continue
 
         img_h, img_w = img.shape[:2]
@@ -67,10 +67,9 @@ def cluster_faces(image_paths):
 
         for face in faces:
 
-            if face.det_score < 0.55:     # slightly relaxed
-                print("Rejected (low confidence):", face.det_score)
+            # Reject low confidence detections
+            if face.det_score < 0.55:
                 continue
-
 
             x1, y1, x2, y2 = face.bbox.astype(int)
 
@@ -78,11 +77,13 @@ def cluster_faces(image_paths):
             y1 = max(0, y1)
             x2 = min(img_w, x2)
             y2 = min(img_h, y2)
-            w, h = x2 - x1, y2 - y1
+
+            w = x2 - x1
+            h = y2 - y1
             area = w * h
 
-            if area < 0.005 * img_area:   # ✅ RELAXED (very important)
-                print("Rejected (tiny face):", area)
+            # Reject tiny faces (background people)
+            if area < 0.005 * img_area:
                 continue
 
             crop = img[y1:y2, x1:x2]
@@ -90,21 +91,24 @@ def cluster_faces(image_paths):
             if crop.size == 0:
                 continue
 
+            # Reject blurry faces
             if is_blurry(crop):
-                print("Rejected (blurry)")
                 continue
 
-            face_data.append({
-                "image": path,
-                "embedding": face.embedding
-            })
+            face_data.append((path, face.embedding))
 
-    if len(face_data) == 0:
+    if not face_data:
         return {}
 
-    embeddings = np.array([f["embedding"] for f in face_data])
+    # --------------------------------------------------
+    # Build embedding matrix
+    # --------------------------------------------------
 
-    print("Total embeddings:", len(embeddings))
+    embeddings = np.array([e for _, e in face_data])
+
+    # --------------------------------------------------
+    # Cluster faces
+    # --------------------------------------------------
 
     labels = DBSCAN(
         eps=0.55,
@@ -114,10 +118,14 @@ def cluster_faces(image_paths):
 
     groups = {}
 
-    for label, record in zip(labels, face_data):
-        groups.setdefault(f"Person_{label}", set()).add(record["image"])
+    for label, (img_path, _) in zip(labels, face_data):
+        key = f"Person_{label}"
 
-    groups = {k: list(v) for k, v in groups.items()}
+        if key not in groups:
+            groups[key] = []
+
+        if img_path not in groups[key]:
+            groups[key].append(img_path)
 
     save_results(groups)
 

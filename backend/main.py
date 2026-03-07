@@ -49,7 +49,7 @@ async def upload(files: List[UploadFile] = File(...), request: Request = None):
 
     result = {
         person: [
-            f"{base_url}/images/{os.path.basename(p)}"
+            f"{base_url}/output/{person}/{os.path.basename(p)}"
             for p in imgs
         ]
         for person, imgs in clusters.items()
