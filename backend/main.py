@@ -32,10 +32,9 @@ app.mount("/images", StaticFiles(directory=UPLOAD_DIR), name="images")
 app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
 
 @app.post("/upload")
-async def upload(request: Request, files: List[UploadFile] = File(...)):
+async def upload(files: List[UploadFile] = File(...), request: Request = None):
     image_paths = []
 
-    # Save uploaded images
     for file in files:
         file_path = os.path.join(UPLOAD_DIR, file.filename)
 
@@ -44,11 +43,9 @@ async def upload(request: Request, files: List[UploadFile] = File(...)):
 
         image_paths.append(file_path)
 
-    # Run face clustering
     clusters = cluster_faces(image_paths)
 
-    # Dynamic base URL (works for Railway / custom domain / local)
-    base_url = str(request.base_url).rstrip("/")
+    base_url = str(request.base_url).rstrip("/") if request else ""
 
     result = {
         person: [
@@ -58,7 +55,6 @@ async def upload(request: Request, files: List[UploadFile] = File(...)):
         for person, imgs in clusters.items()
     }
 
-    # Clean up uploaded images after processing
     for path in image_paths:
         if os.path.exists(path):
             os.remove(path)
