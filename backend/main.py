@@ -16,12 +16,6 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 app = FastAPI()
 
-# Static file mounts
-app.mount("/images", StaticFiles(directory=UPLOAD_DIR), name="images")
-app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
-
-# Enable CORS for frontend (GitHub Pages etc.)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -33,6 +27,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/images", StaticFiles(directory=UPLOAD_DIR), name="images")
+app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
 
 @app.post("/upload")
 async def upload(request: Request, files: List[UploadFile] = File(...)):

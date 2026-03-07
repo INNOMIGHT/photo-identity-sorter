@@ -17,7 +17,15 @@ function App() {
     setLoading(true);
 
     try {
-      const response = await axios.post("https://photo-identity-sorter-production.up.railway.app/upload", formData);
+      const response = await axios.post(
+        "https://photo-identity-sorter-production.up.railway.app/upload",
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
       setClusters(response.data.clusters);
     } catch (err) {
       alert("Upload failed");
