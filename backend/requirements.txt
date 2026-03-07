@@ -1,9 +1,8 @@
 fastapi
 uvicorn
 numpy
-scikit-learn
-python-multipart
 opencv-python-headless
+scikit-learn
 insightface
 onnxruntime
-pillow
+python-multipart

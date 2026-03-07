@@ -41,13 +41,12 @@ def save_results(groups):
         for img_path in images:
             if os.path.exists(img_path):
                 shutil.copy(img_path, os.path.join(person_dir, os.path.basename(img_path)))
-
+                
 
 def cluster_faces(image_paths):
 
     model = get_face_model()
-    faces = model.get(img)
-    reset_output()   # ✅ AUTO CLEAN
+    reset_output()
 
     face_data = []
 
@@ -57,7 +56,7 @@ def cluster_faces(image_paths):
         if img is None:
             continue
 
-        faces = face_model.get(img)
+        faces = model.get(img)
 
         if len(faces) == 0:
             print("No faces:", path)
